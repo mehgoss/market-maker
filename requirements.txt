@@ -11,7 +11,7 @@ pytz
 numpy>=1.21.0
 matplotlib>=3.5.0
 requests>=2.26.0
-pandas>=1.5.0
-mplfinance>=0.12.9
-httpx>=0.23.0
+pandas
+mplfinance
+httpx
 python-telegram-bot>=20.0
