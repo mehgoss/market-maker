@@ -1,6 +1,6 @@
 # settings.py
 import os
-from TeleLogBot import configure_logging 
+#from TeleLogBot import configure_logging 
 
 # BitMEX API credentials from environment variables
 API_KEY = os.getenv("API_KEY")  # Fetches API_KEY from env
@@ -8,7 +8,7 @@ API_SECRET = os.getenv("API_SECRET")  # Fetches API_SECRET from env
 BOT_TOKEN = os.getenv("BOT_TOKEN")  # Fetches API_KEY from env
 CHAT_ID = os.getenv("CHAT_ID")  # Fetches API_SECRET from env
 
-logging, bot = configure_logging(BOT_TOKEN, CHAT_ID) 
+#logging, bot = configure_logging(BOT_TOKEN, CHAT_ID) 
 # Base URL for BitMEX
 BASE_URL = "https://testnet.bitmex.com/api/v1/"  # Testnet URL
 # BASE_URL = "https://www.bitmex.com/api/v1/"  # Uncomment for live trading
