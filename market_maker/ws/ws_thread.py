@@ -145,7 +145,8 @@ class BitMEXWebsocket():
 
     def exit(self):
         self.exited = True
-        self.ws.close()
+        if hasattr(self, 'ws') and self.ws:
+            self.ws.close()
 
     #
     # Private methods
@@ -212,7 +213,7 @@ class BitMEXWebsocket():
         '''Send a raw command.'''
         self.ws.send(json.dumps({"op": command, "args": args or []}))
 
-    def __on_message(self, message):
+    def __on_message(self, ws, message):
         '''Handler for parsing WS messages.'''
         message = json.loads(message)
         logger.debug(json.dumps(message))
@@ -296,14 +297,14 @@ class BitMEXWebsocket():
         except:
             logger.error(traceback.format_exc())
 
-    def __on_open(self):
+    def __on_open(self, ws):
         logger.debug("Websocket Opened.")
 
-    def __on_close(self):
+    def __on_close(self, ws, close_status_code, close_msg):
         logger.info('Websocket Closed')
         self.exit()
 
-    def __on_error(self, error):
+    def __on_error(self, ws, error):
         if not self.exited:
             self.error(error)
 
@@ -318,7 +319,9 @@ def findItemByKeys(keys, table, matchData):
     for item in table:
         matched = True
         for key in keys:
-            if item[key] != matchData[key]:
+            if key not in matchData:
+                matched = False
+            elif item[key] != matchData[key]:
                 matched = False
         if matched:
             return item
@@ -330,4 +333,3 @@ if __name__ == "__main__":
     ws.connect("https://testnet.bitmex.com/api/v1")
     while(ws.ws.sock.connected):
         sleep(1)
-
