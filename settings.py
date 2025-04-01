@@ -1,10 +1,14 @@
 # settings.py
 import os
+from TeleLogBot import configure_logging 
 
 # BitMEX API credentials from environment variables
 API_KEY = os.getenv("API_KEY")  # Fetches API_KEY from env
 API_SECRET = os.getenv("API_SECRET")  # Fetches API_SECRET from env
+BOT_TOKEN = os.getenv("BOT_TOKEN")  # Fetches API_KEY from env
+CHAT_ID = os.getenv("CHAT_ID")  # Fetches API_SECRET from env
 
+logging, bot = configure_logging(BOT_TOKEN, CHAT_ID) 
 # Base URL for BitMEX
 BASE_URL = "https://testnet.bitmex.com/api/v1/"  # Testnet URL
 # BASE_URL = "https://www.bitmex.com/api/v1/"  # Uncomment for live trading
@@ -87,7 +91,7 @@ TIMEOUT = 7
 DRY_BTC = 50
 
 # Available levels: logging.(DEBUG|INFO|WARN|ERROR)
-LOG_LEVEL = logging.INFO
+#LOG_LEVEL = logging.INFO
 
 # To uniquely identify orders placed by this bot, the bot sends a ClOrdID (Client order ID) that is attached
 # to each order so its source can be identified. This keeps the market maker from cancelling orders that are
