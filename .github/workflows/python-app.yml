@@ -43,4 +43,4 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         MAX_RUNTIME: 1800 
       run: |
-        python marketmaker.Py SOLUSD 
+        python marketmaker.py SOLUSD 
