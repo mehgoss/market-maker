@@ -4,6 +4,8 @@ from datetime import datetime, timedelta
 import numpy as np
 import matplotlib.pyplot as plt
 from io import BytesIO
+import mplfinance as mpf
+import pandas as pd
 from market_maker.settings import settings
 from market_maker.market_maker import OrderManager
 from market_maker.utils.TeleLogBot import TelegramBot, configure_logging
@@ -15,11 +17,11 @@ class MatteGreen(OrderManager):
         # Telegram setup
         self.logger, self.tg_bot = configure_logging(bot_token, chat_id)
         self.start_time = datetime.now()
-        self.total_runtime = 30 * 60  # 30 minutes total
-        self.break_duration = 5 * 60  # 5-minute breaks
-        self.run_duration = 5 * 60    # 5-minute runs
+        self.total_runtime = 30 * 60
+        self.break_duration = 5 * 60
+        self.run_duration = 5 * 60
         self.cycle_count = 0
-        self.max_cycles = 5          # 5 cycles
+        self.max_cycles = 5
 
         # SMC parameters
         self.initial_capital = initial_capital
@@ -29,19 +31,17 @@ class MatteGreen(OrderManager):
         self.lookback_period = lookback_period
         self.fvg_threshold = fvg_threshold
 
-        # Real-time data storage
+        # Data storage
         self.close = []
         self.high = []
         self.low = []
         self.open = []
         self.dates = []
-
-        # Structure tracking
         self.swing_highs = []
         self.swing_lows = []
-        self.choch_points = []  # (index, price, type)
-        self.bos_points = []    # (index, price, type)
-        self.fvg_areas = []     # (start_idx, end_idx, min_price, max_price, type)
+        self.choch_points = []
+        self.bos_points = []
+        self.fvg_areas = []
 
         # Trade tracking
         self.trades = []
@@ -50,18 +50,87 @@ class MatteGreen(OrderManager):
         self.win_count = 0
         self.loss_count = 0
 
+    def profile_market(self):
+        """Profile market before trading using historical data"""
+        self.logger.info("📊 Profiling market before trading...")
+        # Fetch historical data (simplified - in reality, use BitMEX API for more data)
+        historical_data = []
+        for _ in range(self.lookback_period * 2):  # Get 2x lookback period
+            ticker = self.get_ticker()
+            historical_data.append({
+                'Date': datetime.now(),
+                'Open': ticker['mid'],
+                'High': ticker['sell'],
+                'Low': ticker['buy'],
+                'Close': ticker['mid']
+            })
+            time.sleep(1)  # Simulate slower data collection
+        
+        df = pd.DataFrame(historical_data)
+        df.set_index('Date', inplace=True)
+        
+        # Simulate trades on historical data
+        temp_close = df['Close'].tolist()
+        temp_high = df['High'].tolist()
+        temp_low = df['Low'].tolist()
+        temp_trades = []
+        temp_equity = [self.initial_capital]
+        temp_capital = self.initial_capital
+        temp_wins = 0
+        temp_losses = 0
+        
+        for i in range(self.lookback_period, len(temp_close)):
+            recent_highs = [(idx, h) for idx, h in enumerate(temp_high[:i+1]) if h == max(temp_high[max(0, idx-3):idx+1])]
+            recent_lows = [(idx, l) for idx, l in enumerate(temp_low[:i+1]) if l == min(temp_low[max(0, idx-3):idx+1])]
+            
+            if len(recent_highs) >= 2 and len(recent_lows) >= 2:
+                entry_price = temp_close[i]
+                direction = 'long' if temp_close[i] > temp_close[i-1] else 'short'
+                stop_dist = (entry_price - min(temp_low[i-5:i+1])) if direction == 'long' else (max(temp_high[i-5:i+1]) - entry_price)
+                stop_loss = entry_price - stop_dist * 1.1 if direction == 'long' else entry_price + stop_dist * 1.1
+                take_profit = entry_price + stop_dist * self.rr_ratio if direction == 'long' else entry_price - stop_dist * self.rr_ratio
+                risk_amount = temp_capital * self.risk_per_trade
+                size = risk_amount / abs(entry_price - stop_loss)
+                
+                # Simulate trade outcome
+                for j in range(i+1, len(temp_close)):
+                    if direction == 'long':
+                        if temp_low[j] <= stop_loss:
+                            pl = (stop_loss - entry_price) * size
+                            temp_losses += 1
+                            break
+                        elif temp_high[j] >= take_profit:
+                            pl = (take_profit - entry_price) * size
+                            temp_wins += 1
+                            break
+                    else:
+                        if temp_high[j] >= stop_loss:
+                            pl = (entry_price - stop_loss) * size
+                            temp_losses += 1
+                            break
+                        elif temp_low[j] <= take_profit:
+                            pl = (entry_price - take_profit) * size
+                            temp_wins += 1
+                            break
+                else:
+                    pl = (temp_close[-1] - entry_price) * size if direction == 'long' else (entry_price - temp_close[-1]) * size
+                
+                temp_capital += pl
+                temp_trades.append({'pl': pl, 'result': 'win' if pl > 0 else 'loss'})
+                temp_equity.append(temp_capital)
+        
+        win_rate = temp_wins / (temp_wins + temp_losses) * 100 if (temp_wins + temp_losses) > 0 else 0
+        self.logger.info(f"📈 Profile Results: Win Rate: {win_rate:.1f}%, Simulated Trades: {len(temp_trades)}")
+        return win_rate, temp_equity
+
     def update_market_data(self):
-        """Update price data from BitMEX"""
         ticker = self.get_ticker()
-        instrument = self.get_instrument()
-        
         self.close.append(ticker['mid'])
-        self.high.append(ticker['sell'])  # Using sell as high proxy
-        self.low.append(ticker['buy'])    # Using buy as low proxy
+        self.high.append(ticker['sell'])
+        self.low.append(ticker['buy'])
         self.open.append(self.close[-1] if not self.open else self.close[-2])
-        self.dates.append(datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+        self.dates.append(datetime.now())
         
-        # Keep only lookback_period + buffer worth of data
         if len(self.close) > self.lookback_period + 10:
             self.close.pop(0)
             self.high.pop(0)
@@ -72,15 +141,13 @@ class MatteGreen(OrderManager):
             self.swing_lows.pop(0)
 
     def identify_swing_points(self):
-        """Identify swing highs and lows in real-time"""
-        if len(self.close) < 5:  # Need at least 5 candles
+        if len(self.close) < 5:
             self.swing_highs.append(0)
             self.swing_lows.append(0)
             return
-
+        
         window = min(self.lookback_period // 2, 3)
         i = len(self.close) - 1
-        
         is_swing_high = all(self.high[i] >= self.high[i-j] for j in range(1, min(window+1, i+1))) and \
                        all(self.high[i] >= self.high[i+j] for j in range(1, min(window+1, len(self.high)-i)))
         is_swing_low = all(self.low[i] <= self.low[i-j] for j in range(1, min(window+1, i+1))) and \
@@ -90,19 +157,15 @@ class MatteGreen(OrderManager):
         self.swing_lows.append(1 if is_swing_low else 0)
 
     def detect_market_structure(self):
-        """Detect SMC patterns in real-time"""
         if len(self.close) < self.lookback_period:
             return
-
+        
         i = len(self.close) - 1
         recent_highs = [(idx, h) for idx, h in enumerate(self.high) if self.swing_highs[idx]]
         recent_lows = [(idx, l) for idx, l in enumerate(self.low) if self.swing_lows[idx]]
         
-        market_bias = 'neutral'
-        if self.choch_points:
-            market_bias = self.choch_points[-1][2]
+        market_bias = 'neutral' if not self.choch_points else self.choch_points[-1][2]
         
-        # CHoCH detection
         if len(recent_highs) >= 2 and len(recent_lows) >= 2:
             if (market_bias in ['bullish', 'neutral'] and 
                 recent_highs[-1][1] < recent_highs[-2][1] and 
@@ -112,24 +175,19 @@ class MatteGreen(OrderManager):
                   recent_lows[-1][1] > recent_lows[-2][1] and 
                   recent_highs[-1][1] > recent_highs[-2][1]):
                 self.choch_points.append((i, self.close[i], 'bullish'))
-
-        # BOS detection
+        
         if market_bias == 'bearish' and recent_highs and self.high[i] > recent_highs[-1][1]:
             self.bos_points.append((i, self.high[i], 'bullish'))
         elif market_bias == 'bullish' and recent_lows and self.low[i] < recent_lows[-1][1]:
             self.bos_points.append((i, self.low[i], 'bearish'))
-
-        # FVG detection
+        
         if i > 1:
-            gap_size_up = self.low[i] - self.high[i-2]
-            if gap_size_up > self.fvg_threshold * self.close[i]:
+            if self.low[i] - self.high[i-2] > self.fvg_threshold * self.close[i]:
                 self.fvg_areas.append((i-2, i, self.high[i-2], self.low[i], 'bullish'))
-            gap_size_down = self.low[i-2] - self.high[i]
-            if gap_size_down > self.fvg_threshold * self.close[i]:
+            if self.low[i-2] - self.high[i] > self.fvg_threshold * self.close[i]:
                 self.fvg_areas.append((i-2, i, self.high[i], self.low[i-2], 'bearish'))
 
     def place_orders(self):
-        """Place orders based on SMC patterns"""
         self.update_market_data()
         self.identify_swing_points()
         self.detect_market_structure()
@@ -137,7 +195,6 @@ class MatteGreen(OrderManager):
         ticker = self.get_ticker()
         i = len(self.close) - 1
         
-        # Check existing trades
         for trade in list(self.current_trades):
             idx, entry_price, direction, stop_loss, take_profit, size = trade
             if (direction == 'long' and ticker['buy'] <= stop_loss) or \
@@ -156,19 +213,16 @@ class MatteGreen(OrderManager):
                                   'exit_price': take_profit, 'direction': direction, 'pl': pl, 'result': 'win'})
                 self.current_trades.remove(trade)
                 self.win_count += 1
-
-        # New trade setups
+        
         buy_orders = []
         sell_orders = []
         potential_entries = []
         
         for idx, price, type_ in self.choch_points[-1:] + self.bos_points[-1:]:
             if i - idx <= 3:
-                if type_ == 'bullish':
-                    potential_entries.append((idx, price, 'long', 'CHoCH' if (idx, price, type_) in self.choch_points else 'BOS'))
-                else:
-                    potential_entries.append((idx, price, 'short', 'CHoCH' if (idx, price, type_) in self.choch_points else 'BOS'))
-
+                potential_entries.append((idx, price, 'long' if type_ == 'bullish' else 'short', 
+                                       'CHoCH' if (idx, price, type_) in self.choch_points else 'BOS'))
+        
         if len(self.current_trades) < 3:
             for entry_idx, entry_price, direction, entry_type in potential_entries:
                 fvg_confirmed = any(
@@ -181,7 +235,6 @@ class MatteGreen(OrderManager):
                     stop_dist = (entry_price - min(self.low[-5:])) if direction == 'long' else (max(self.high[-5:]) - entry_price)
                     stop_loss = entry_price - stop_dist * 1.1 if direction == 'long' else entry_price + stop_dist * 1.1
                     take_profit = entry_price + stop_dist * self.rr_ratio if direction == 'long' else entry_price - stop_dist * self.rr_ratio
-                    
                     risk_amount = self.capital * self.risk_per_trade
                     size = risk_amount / abs(entry_price - stop_loss)
                     
@@ -192,58 +245,76 @@ class MatteGreen(OrderManager):
         self.equity_curve.append(self.capital)
         self.converge_orders(buy_orders, sell_orders)
 
-    def create_visualization(self):
-        """Create SMC visualization with equity curve"""
-        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 10), gridspec_kw={'height_ratios': [3, 1]})
+    def create_visualization(self, profile_win_rate, profile_equity):
+        """Create visualization with mplfinance candlestick and profile stats"""
+        df = pd.DataFrame({
+            'Date': self.dates,
+            'Open': self.open,
+            'High': self.high,
+            'Low': self.low,
+            'Close': self.close
+        }).set_index('Date')
         
-        # Price plot
-        ax1.plot(self.close, color='black', label='Price')
-        for i, h in enumerate(self.high):
-            if self.swing_highs[i]:
-                ax1.scatter(i, h, color='red', marker='^')
-            if self.swing_lows[i]:
-                ax1.scatter(i, self.low[i], color='green', marker='v')
+        fig = plt.figure(figsize=(12, 10))
+        ax1 = plt.subplot2grid((5, 1), (0, 0), rowspan=3)
+        ax2 = plt.subplot2grid((5, 1), (3, 0), rowspan=2)
+        
+        # Candlestick chart
+        mpf.plot(df, type='candle', ax=ax1, style='charles', 
+                addplot=[
+                    mpf.make_addplot([h if sh else np.nan for h, sh in zip(self.high, self.swing_highs)], 
+                                   type='scatter', markersize=50, marker='^', color='red'),
+                    mpf.make_addplot([l if sl else np.nan for l, sl in zip(self.low, self.swing_lows)], 
+                                   type='scatter', markersize=50, marker='v', color='green')
+                ])
         
         for idx, price, type_ in self.choch_points:
-            ax1.scatter(idx, price, color='green' if type_ == 'bullish' else 'red', marker='o')
+            ax1.scatter(idx, price, color='green' if type_ == 'bullish' else 'red', marker='o', s=100)
         for idx, price, type_ in self.bos_points:
-            ax1.scatter(idx, price, color='green' if type_ == 'bullish' else 'red', marker='s')
+            ax1.scatter(idx, price, color='green' if type_ == 'bullish' else 'red', marker='s', s=100)
         for start, end, min_p, max_p, type_ in self.fvg_areas:
             ax1.fill_between(range(start, end+1), min_p, max_p, 
                            color='lightgreen' if type_ == 'bullish' else 'lightcoral', alpha=0.3)
         
         # Equity curve
-        ax2.plot(self.equity_curve, color='green', label='Equity')
+        ax2.plot(self.equity_curve, color='green', label='Live Equity')
+        ax2.plot(range(len(profile_equity)), profile_equity, color='blue', label='Profile Equity', alpha=0.5)
         ax2.set_title('Equity Curve')
         ax2.set_ylabel('Capital ($)')
         ax2.grid(True)
+        ax2.legend()
+        
+        # Add profile stats
+        live_win_rate = self.win_count / (self.win_count + self.loss_count) * 100 if (self.win_count + self.loss_count) > 0 else 0
+        plt.figtext(0.1, 0.05, 
+                   f"Profile Win Rate: {profile_win_rate:.1f}%\n"
+                   f"Live Win Rate: {live_win_rate:.1f}%\n"
+                   f"Total Trades: {len(self.trades)}",
+                   ha="left", fontsize=10, bbox={"facecolor": "white", "alpha": 0.5, "pad": 5})
         
         ax1.set_title(f'MatteGreen SMC - Cycle {self.cycle_count + 1}')
-        ax1.set_ylabel('Price')
-        ax1.grid(True)
-        ax1.legend(['Price'])
-        
         plt.tight_layout()
+        
         buffer = BytesIO()
         fig.savefig(buffer, format='png', bbox_inches='tight')
         buffer.seek(0)
         return buffer, fig
 
-    def send_status_update(self):
-        """Send visualization via Telegram"""
-        buffer, fig = self.create_visualization()
+    def send_status_update(self, profile_win_rate, profile_equity):
+        buffer, fig = self.create_visualization(profile_win_rate, profile_equity)
         if buffer:
             win_rate = self.win_count / (self.win_count + self.loss_count) * 100 if (self.win_count + self.loss_count) > 0 else 0
             caption = (f"📈 MatteGreen SMC - Cycle {self.cycle_count + 1}/{self.max_cycles}\n"
                       f"Time: {datetime.now().strftime('%H:%M:%S')}\n"
                       f"Balance: ${self.capital:.2f}\n"
-                      f"Trades: {len(self.trades)} (Win Rate: {win_rate:.1f}%)")
+                      f"Trades: {len(self.trades)} (Live Win Rate: {win_rate:.1f}%)")
             self.tg_bot.send_photo(buffer, caption)
             buffer.close()
             plt.close(fig)
 
     def run_loop(self):
         self.logger.info("🤖 MatteGreen SMC Bot starting...")
+        profile_win_rate, profile_equity = self.profile_market()
         
         while self.cycle_count < self.max_cycles:
             cycle_start = datetime.now()
@@ -260,7 +331,7 @@ class MatteGreen(OrderManager):
                 time.sleep(self.settings.LOOP_INTERVAL)
             
             self.cycle_count += 1
-            self.send_status_update()
+            self.send_status_update(profile_win_rate, profile_equity)
             
             if self.cycle_count < self.max_cycles:
                 self.logger.info(f"⏸️ Break time (Cycle {self.cycle_count}/{self.max_cycles})")
@@ -269,7 +340,7 @@ class MatteGreen(OrderManager):
                 self.logger.info("🔄 Resuming after break")
         
         self.logger.info("🏁 MatteGreen completed all cycles")
-        self.send_status_update()
+        self.send_status_update(profile_win_rate, profile_equity)
         self.exit()
 
 def run():
