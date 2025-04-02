@@ -2,15 +2,16 @@ import sys
 import time
 import pandas as pd
 import numpy as np
+from collections import deque
 from datetime import datetime, timedelta
 import pytz
-from collections import deque 
 import matplotlib.pyplot as plt
 import mplfinance as mpf
-from market_maker.settings import settings
+import requests
 from market_maker.market_maker import OrderManager
-from market_maker.utils.TeleLogBot import configure_logging, TelegramBot  # Assumes TeleLogBot is here
-from market_maker import bitmex  # BitMEX API integration
+from market_maker.utils.TeleLogBot import configure_logging, TelegramBot
+from market_maker import bitmex
+from market_maker.settings import settings  # Import settings for env vars
 
 def get_sast_time():
     utc_now = datetime.utcnow()
@@ -20,7 +21,6 @@ def get_sast_time():
 class MatteGreenOrderManager(OrderManager):
     def __init__(self):
         super().__init__()
-        # MatteGreen-specific parameters
         self.timeframe = "5m"
         self.initial_capital = 10000
         self.current_balance = self.initial_capital
@@ -28,41 +28,55 @@ class MatteGreenOrderManager(OrderManager):
         self.rr_ratio = 1.25
         self.lookback_period = 20
         self.fvg_threshold = 0.003
-        #BOT_TOKEN =   # Replace with actual token
-        #CHAT_ID =      # Replace with actual chat ID
+        # Use settings from market_maker.settings instead of os.getenv
         self.telegram_token = settings.BOT_TOKEN
         self.telegram_chat_id = settings.CHAT_ID
         
-        # Logging and Telegram setup
         self.logger, self.bot = configure_logging(self.telegram_token, self.telegram_chat_id)
         self.telegram_bot = TelegramBot(self.telegram_token, self.telegram_chat_id) if self.telegram_token and self.telegram_chat_id else None
         
-        # Market data and state
         self.df = pd.DataFrame()
         self.swing_highs = []
         self.swing_lows = []
         self.choch_points = []
         self.bos_points = []
         self.fvg_areas = []
-        self.current_trades = []  # List of (orderID, entry_price, direction, stop_loss, take_profit, size)
-        self.trades = []  # Completed trades
+        self.current_trades = []
+        self.trades = []
         self.equity_curve = [self.initial_capital]
         self.market_bias = 'neutral'
         
         self.logger.info(f"🎉 MatteGreenOrderManager initialized for {self.exchange.symbol} on {self.timeframe}")
 
     def get_market_data(self):
-        """Fetch candle data using BitMEX API."""
+        """Fetch historical candlestick data from BitMEX API."""
         try:
-            # Use BitMEX API to fetch candles (assuming binSize matches timeframe)
-            data = self.exchange.bitmex.get_ticker(binSize=self.timeframe, count=self.lookback_period * 2)
+            url = f"{self.exchange.bitmex.base_url}/api/v1/trade/bucketed"
+            params = {
+                "binSize": self.timeframe,
+                "symbol": self.exchange.symbol,
+                "count": self.lookback_period * 2,
+                "reverse": True
+            }
+            if not self.exchange.dry_run:
+                headers = self.exchange.bitmex._curl_bitmex(path="GET /api/v1/trade/bucketed", query=params, verb="GET")
+                response = requests.get(url, headers=headers, timeout=self.exchange.bitmex.timeout)
+                data = response.json()
+            else:
+                data = [
+                    {"timestamp": (datetime.utcnow() - timedelta(minutes=i*5)).isoformat() + "Z",
+                     "open": 100 + i, "high": 102 + i, "low": 99 + i, "close": 101 + i}
+                    for i in range(self.lookback_period * 2)
+                ]
+
             if not data or len(data) == 0:
-                self.logger.error("🚨 No data from BitMEX API")
+                self.logger.error("🚨 No candlestick data from BitMEX API")
                 return False
-            # Convert to DataFrame and set timestamp index
+
             self.df = pd.DataFrame(data)
             self.df['timestamp'] = pd.to_datetime(self.df['timestamp'])
             self.df.set_index('timestamp', inplace=True)
+            self.df = self.df[['open', 'high', 'low', 'close']]
             self.df['higher_high'] = False
             self.df['lower_low'] = False
             self.df['bos_up'] = False
@@ -71,6 +85,7 @@ class MatteGreenOrderManager(OrderManager):
             self.df['choch_down'] = False
             self.df['bullish_fvg'] = False
             self.df['bearish_fvg'] = False
+            self.logger.info(f"📊 Fetched {len(self.df)} candles for {self.exchange.symbol}")
             return True
         except Exception as e:
             self.logger.error(f"🚨 Market data fetch failed: {str(e)}")
@@ -133,7 +148,6 @@ class MatteGreenOrderManager(OrderManager):
         total_risk_amount = sum(abs(entry_price - stop_loss) * size for _, entry_price, _, stop_loss, _, size in self.current_trades)
         max_total_risk = self.current_balance * 0.20
 
-        # Check existing trades for exits
         for trade in list(self.current_trades):
             order_id, entry_price, direction, stop_loss, take_profit, size = trade
             if (direction == 'long' and self.df['low'].iloc[current_idx] <= stop_loss) or \
@@ -153,7 +167,6 @@ class MatteGreenOrderManager(OrderManager):
                 self.current_trades.remove(trade)
                 self.logger.info(f"💰 Exit: {direction} took profit at {take_profit}")
 
-        # Enter new trades if conditions are met
         if len(self.current_trades) < 3 and current_idx >= self.lookback_period:
             direction = 'long' if self.market_bias == 'bullish' else 'short' if self.market_bias == 'bearish' else None
             if direction:
@@ -192,23 +205,21 @@ class MatteGreenOrderManager(OrderManager):
                 side = "Buy" if signal['side'] == 'long' else "Sell"
                 order = {
                     'price': signal['price'],
-                    'orderQty': max(2, int(signal['position_size'])),  # Ensure minimum quantity
+                    'orderQty': max(2, int(signal['position_size'])),
                     'side': side,
-                    'stopPx': signal['stop_loss'],  # For stop-loss order
-                    'execInst': 'ParticipateDoNotInitiate'  # Post-only equivalent
+                    'stopPx': signal['stop_loss'],
+                    'execInst': 'ParticipateDoNotInitiate'
                 }
                 if side == "Buy":
                     buy_orders.append(order)
                 else:
                     sell_orders.append(order)
-                # Place market order and set SL/TP
                 if not self.exchange.dry_run:
                     try:
                         result = self.exchange.bitmex.create(side=side, orderQty=order['orderQty'], ordType="Market")
                         if result and 'orderID' in result:
                             order_id = result['orderID']
                             self.current_trades.append((order_id, signal['price'], signal['side'], signal['stop_loss'], signal['take_profit'], signal['position_size']))
-                            # Set stop-loss and take-profit
                             self.exchange.bitmex.create(side="Sell" if side == "Buy" else "Buy", orderQty=order['orderQty'], 
                                                         stopPx=signal['stop_loss'], ordType="Stop", execInst="Close")
                             self.exchange.bitmex.create(side="Sell" if side == "Buy" else "Buy", orderQty=order['orderQty'], 
@@ -220,12 +231,11 @@ class MatteGreenOrderManager(OrderManager):
                 order_id = signal['order_id']
                 if not self.exchange.dry_run:
                     try:
-                        self.exchange.bitmex.cancel(order_id)  # Individual cancellation
+                        self.exchange.bitmex.cancel(order_id)
                         self.logger.info(f"🛑 Cancelled order {order_id} due to {signal['reason']}")
                     except Exception as e:
                         self.logger.error(f"🚨 Failed to cancel order {order_id}: {str(e)}")
 
-        # Bulk cancellation if too many trades are open
         if len(self.current_trades) > 3:
             self.exchange.cancel_all_orders()
             self.current_trades.clear()
@@ -233,7 +243,6 @@ class MatteGreenOrderManager(OrderManager):
 
         self.converge_orders(buy_orders, sell_orders)
         
-        # Visualization and Telegram update
         if self.telegram_bot:
             fig = self.visualize_results(start_idx=max(0, len(self.df) - 48))
             sast_now = get_sast_time()
