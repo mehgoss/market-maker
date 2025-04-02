@@ -4,6 +4,7 @@ import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
 import pytz
+from collections import deque 
 import matplotlib.pyplot as plt
 import mplfinance as mpf
 from market_maker.settings import settings
