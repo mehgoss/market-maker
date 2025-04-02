@@ -61,28 +61,33 @@ class MatteGreenOrderManager(OrderManager):
                 "reverse": True
             }
             if not self.exchange.dry_run:
+                # Get headers from _curl_bitmex
                 headers = self.exchange.bitmex._curl_bitmex(path="trade/bucketed", query=params, verb="GET")
-                # Add debugging to see what's coming back
+                
+                # Fix: Ensure headers is a dictionary, not a list
+                if isinstance(headers, list):
+                    self.logger.warning("Headers returned as list, converting to empty dict")
+                    headers = {}  # Use empty dict if headers is a list
+                
+                # Now make the request with proper headers
                 response = requests.get(url, headers=headers, timeout=self.exchange.bitmex.timeout)
                 
-                # Check if response is valid
+                # Check response status
                 if response.status_code != 200:
                     self.logger.error(f"🚨 API request failed with status code {response.status_code}: {response.text}")
                     return False
                     
                 data = response.json()
                 
-                # Add explicit type checking
-                if not isinstance(data, list):
-                    self.logger.error(f"🚨 Unexpected data format: expected list, got {type(data)}")
-                    return False
             else:
+                # Dry run simulation code
                 data = [
                     {"timestamp": (datetime.utcnow() - timedelta(minutes=i*5)).isoformat() + "Z",
-                     "open": 100 + i, "high": 102 + i, "low": 99 + i, "close": 101 + i}
+                    "open": 100 + i, "high": 102 + i, "low": 99 + i, "close": 101 + i}
                     for i in range(self.lookback_period * 2)
                 ]
 
+            # Rest of the method remains the same
             if not data or len(data) == 0:
                 self.logger.error("🚨 No candlestick data from BitMEX API")
                 return False
@@ -91,7 +96,7 @@ class MatteGreenOrderManager(OrderManager):
             self.df['timestamp'] = pd.to_datetime(self.df['timestamp'])
             self.df.set_index('timestamp', inplace=True)
             
-            # Ensure all required columns exist, otherwise create them with default values
+            # Ensure all required columns exist
             required_columns = ['open', 'high', 'low', 'close']
             for col in required_columns:
                 if col not in self.df.columns:
@@ -111,10 +116,9 @@ class MatteGreenOrderManager(OrderManager):
             return True
         except Exception as e:
             self.logger.error(f"🚨 Market data fetch failed: {str(e)}")
-            # Add more detailed exception information for debugging
             import traceback
             self.logger.error(f"🚨 Traceback: {traceback.format_exc()}")
-            return False
+            return False    
 
 
     def identify_swing_points(self):
