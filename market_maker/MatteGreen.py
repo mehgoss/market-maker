@@ -53,7 +53,7 @@ class MatteGreenOrderManager(OrderManager):
     def get_market_data(self):
         """Fetch historical candlestick data from BitMEX API."""
         try:
-            url = f"{self.exchange.bitmex.base_url}/api/v1/trade/bucketed"
+            url = f"{self.exchange.bitmex.base_url}trade/bucketed"
             params = {
                 "binSize": self.timeframe,
                 "symbol": self.exchange.symbol,
