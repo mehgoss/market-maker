@@ -49,7 +49,7 @@ class MatteGreenOrderManager(OrderManager):
         self.market_bias = 'neutral'
         
         self.logger.info(f"🎉 MatteGreenOrderManager initialized for {self.exchange.symbol} on {self.timeframe}")
-
+        
     def get_market_data(self):
         """Fetch historical candlestick data from BitMEX API."""
         try:
@@ -62,8 +62,20 @@ class MatteGreenOrderManager(OrderManager):
             }
             if not self.exchange.dry_run:
                 headers = self.exchange.bitmex._curl_bitmex(path="trade/bucketed", query=params, verb="GET")
+                # Add debugging to see what's coming back
                 response = requests.get(url, headers=headers, timeout=self.exchange.bitmex.timeout)
+                
+                # Check if response is valid
+                if response.status_code != 200:
+                    self.logger.error(f"🚨 API request failed with status code {response.status_code}: {response.text}")
+                    return False
+                    
                 data = response.json()
+                
+                # Add explicit type checking
+                if not isinstance(data, list):
+                    self.logger.error(f"🚨 Unexpected data format: expected list, got {type(data)}")
+                    return False
             else:
                 data = [
                     {"timestamp": (datetime.utcnow() - timedelta(minutes=i*5)).isoformat() + "Z",
@@ -78,7 +90,15 @@ class MatteGreenOrderManager(OrderManager):
             self.df = pd.DataFrame(data)
             self.df['timestamp'] = pd.to_datetime(self.df['timestamp'])
             self.df.set_index('timestamp', inplace=True)
-            self.df = self.df[['open', 'high', 'low', 'close']]
+            
+            # Ensure all required columns exist, otherwise create them with default values
+            required_columns = ['open', 'high', 'low', 'close']
+            for col in required_columns:
+                if col not in self.df.columns:
+                    self.logger.warning(f"🚨 Missing column '{col}' in API response, adding with default values")
+                    self.df[col] = 0.0
+                    
+            self.df = self.df[required_columns]
             self.df['higher_high'] = False
             self.df['lower_low'] = False
             self.df['bos_up'] = False
@@ -91,7 +111,11 @@ class MatteGreenOrderManager(OrderManager):
             return True
         except Exception as e:
             self.logger.error(f"🚨 Market data fetch failed: {str(e)}")
+            # Add more detailed exception information for debugging
+            import traceback
+            self.logger.error(f"🚨 Traceback: {traceback.format_exc()}")
             return False
+
 
     def identify_swing_points(self):
         """Identify swing highs and lows."""
