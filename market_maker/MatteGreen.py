@@ -1,3 +1,4 @@
+#MatteGreen.py 
 import sys
 import time
 import pandas as pd
@@ -11,7 +12,7 @@ import requests
 from market_maker.market_maker import OrderManager
 from market_maker.utils.TeleLogBot import configure_logging, TelegramBot
 from market_maker import bitmex
-from market_maker.settings import settings  # Import settings for env vars
+from market_maker.settings import settings
 
 def get_sast_time():
     utc_now = datetime.utcnow()
@@ -20,7 +21,7 @@ def get_sast_time():
 
 class MatteGreenOrderManager(OrderManager):
     def __init__(self):
-        super().__init__()
+        # Initialize critical attributes before super().__init__()
         self.timeframe = "5m"
         self.initial_capital = 10000
         self.current_balance = self.initial_capital
@@ -28,13 +29,17 @@ class MatteGreenOrderManager(OrderManager):
         self.rr_ratio = 1.25
         self.lookback_period = 20
         self.fvg_threshold = 0.003
-        # Use settings from market_maker.settings instead of os.getenv
         self.telegram_token = settings.BOT_TOKEN
         self.telegram_chat_id = settings.CHAT_ID
         
+        # Set up logger and bot before super().__init__()
         self.logger, self.bot = configure_logging(self.telegram_token, self.telegram_chat_id)
         self.telegram_bot = TelegramBot(self.telegram_token, self.telegram_chat_id) if self.telegram_token and self.telegram_chat_id else None
         
+        # Now call parent constructor
+        super().__init__()
+        
+        # Initialize remaining attributes
         self.df = pd.DataFrame()
         self.swing_highs = []
         self.swing_lows = []
