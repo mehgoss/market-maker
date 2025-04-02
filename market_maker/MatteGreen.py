@@ -55,7 +55,7 @@ class MatteGreenOrderManager(OrderManager):
         try:
             url = f"{self.exchange.bitmex.base_url}trade/bucketed"
             params = {
-                "binSize": "5m",
+                "binSize": '5m',
                 "symbol": self.exchange.symbol,
                 "count": self.lookback_period * 2,
                 "reverse": True
