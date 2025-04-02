@@ -61,7 +61,7 @@ class MatteGreenOrderManager(OrderManager):
                 "reverse": True
             }
             if not self.exchange.dry_run:
-                headers = self.exchange.bitmex._curl_bitmex(path="/api/v1/trade/bucketed", query=params, verb="GET")
+                headers = self.exchange.bitmex._curl_bitmex(path="api/v1/trade/bucketed", query=params, verb="GET")
                 response = requests.get(url, headers=headers, timeout=self.exchange.bitmex.timeout)
                 data = response.json()
             else:
