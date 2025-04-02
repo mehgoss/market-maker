@@ -55,7 +55,7 @@ class MatteGreenOrderManager(OrderManager):
         """Fetch candle data using BitMEX API."""
         try:
             # Use BitMEX API to fetch candles (assuming binSize matches timeframe)
-            data = self.exchange.bitmex.candles(binSize=self.timeframe, count=self.lookback_period * 2)
+            data = self.exchange.bitmex.get_ticker(binSize=self.timeframe, count=self.lookback_period * 2)
             if not data or len(data) == 0:
                 self.logger.error("🚨 No data from BitMEX API")
                 return False
