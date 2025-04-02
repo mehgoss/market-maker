@@ -1,4 +1,3 @@
-#MatteGreen.py 
 import sys
 import time
 import pandas as pd
@@ -21,7 +20,6 @@ def get_sast_time():
 
 class MatteGreenOrderManager(OrderManager):
     def __init__(self):
-        # Initialize critical attributes before super().__init__()
         self.timeframe = "5m"
         self.initial_capital = 10000
         self.current_balance = self.initial_capital
@@ -32,14 +30,13 @@ class MatteGreenOrderManager(OrderManager):
         self.telegram_token = settings.BOT_TOKEN
         self.telegram_chat_id = settings.CHAT_ID
         
-        # Set up logger and bot before super().__init__()
         self.logger, self.bot = configure_logging(self.telegram_token, self.telegram_chat_id)
-        self.telegram_bot = TelegramBot(self.telegram_token, self.telegram_chat_id) if self.telegram_token and self.telegram_chat_id else None
+        # Temporarily disable Telegram to avoid event loop issues
+        self.telegram_bot = None  # Uncomment next line to re-enable after testing
+        # self.telegram_bot = TelegramBot(self.telegram_token, self.telegram_chat_id) if self.telegram_token and self.telegram_chat_id else None
         
-        # Now call parent constructor
         super().__init__()
         
-        # Initialize remaining attributes
         self.df = pd.DataFrame()
         self.swing_highs = []
         self.swing_lows = []
@@ -64,7 +61,7 @@ class MatteGreenOrderManager(OrderManager):
                 "reverse": True
             }
             if not self.exchange.dry_run:
-                headers = self.exchange.bitmex._curl_bitmex(path="GET /api/v1/trade/bucketed", query=params, verb="GET")
+                headers = self.exchange.bitmex._curl_bitmex(path="/api/v1/trade/bucketed", query=params, verb="GET")
                 response = requests.get(url, headers=headers, timeout=self.exchange.bitmex.timeout)
                 data = response.json()
             else:
